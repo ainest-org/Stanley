@@ -53,12 +53,12 @@ work item's milestone (project Maintainers and Owners only).
 
 ### How sync works
 
-1. **Webhooks** (issues, merge requests, pipelines) are registered per synced project and trigger an immediate re-sync of that project.
-2. **Reconciliation** re-reads every active project every 15 minutes, staggered so projects aren't polled on the same tick, with exponential backoff on GitLab rate limits. Reconciliation always wins over webhook state.
+1. **Webhooks** (issues, merge requests, pipelines) are registered per synced project. Each event refreshes **just the one issue or merge request it is about** (one or two GitLab calls), and bursts of events for the same item are batched into a single refresh.
+2. **Reconciliation** re-reads every active project every 15 minutes as a safety net, staggered so projects aren't polled on the same tick, with exponential backoff on GitLab rate limits. Reconciliation always wins over webhook state.
 3. The service token reads GitLab via **GraphQL (Work Items API)**, with a **REST fallback** for older instances.
 4. Merge requests are linked to work items only through references GitLab itself shows (`Closes #12`, `Related to #12`, `#12` in the title or description). Stanley's Link and Unlink buttons write the same references, so the two never disagree.
 
-Comments and full threads are never cached; they are read live, as you, when a panel opens.
+Stanley also refreshes the affected item right after its own write actions (comment, link, review request), and the sidebar has a **Refresh from GitLab** button with a "synced X ago" label. Comments and full threads are never cached; they are read live, as you, when a panel opens.
 
 ## Repository layout
 
@@ -196,7 +196,7 @@ Stanley registers a webhook on each synced project pointing at `BACKEND_BASE_URL
 
 - `localhost` from GitLab's point of view is GitLab itself, so a laptop backend can't receive webhooks directly. Deploy the backend somewhere GitLab can reach, or use a tunnel.
 - GitLab blocks webhooks to private addresses by default. To allow them: Admin Area, Settings, Network, Outbound requests, then enable *Allow requests to the local network from webhooks and integrations*.
-- If webhook registration fails, syncing still works through the 15-minute reconciliation. You'll just see changes with a delay.
+- If webhooks can't reach the backend, syncing still works through the 15-minute reconciliation, plus the Refresh button and the refresh after your own actions. Only changes made directly in GitLab show up with a delay.
 
 ## API overview
 

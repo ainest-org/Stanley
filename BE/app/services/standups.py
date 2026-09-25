@@ -13,7 +13,7 @@ from app.models.blocked_flag import BlockedFlag
 from app.models.check_in import CheckIn
 from app.models.standup_follow import StandupFollow
 from app.models.synced_project import SyncedProject
-from app.models.user import User, is_placeholder_username
+from app.models.user import InToolRole, User, is_placeholder_username
 from app.models.work_item import WorkItem
 
 BULLET = re.compile(r"^\s*(?:[-*•]\s*)?")
@@ -37,7 +37,10 @@ async def build_standups(db: AsyncSession, viewer: User, day: date, scope: str) 
         for u in (
             await db.execute(select(User).where(User.organization_id == viewer.organization_id).order_by(User.name))
         ).scalars().all()
-        if u.id != viewer.id and not is_placeholder_username(u.gitlab_username) and u.is_active
+        if u.id != viewer.id
+        and u.in_tool_role != InToolRole.EXEC
+        and not is_placeholder_username(u.gitlab_username)
+        and u.is_active
     ]
     people = [u for u in everyone if u.id in follows] if scope == "following" else everyone
     person_ids = [u.id for u in people]

@@ -23,6 +23,7 @@ from app.models.synced_project import SyncedProject
 from app.models.user import User, is_placeholder_username
 from app.models.work_item import WorkItem, work_item_labels
 from app.sync.gid import parse_dt
+from app.workers.coalesce import enqueue_targeted
 from app.sync.mutations import add_note, create_issue, set_merge_request_reviewers
 
 router = APIRouter(prefix="/api", tags=["work-item-actions"])
@@ -227,6 +228,7 @@ async def comment_on_work_item(
         await add_note(project, "issues", item.gitlab_iid, body.body, access_token)
     except httpx.HTTPStatusError as exc:
         raise _gitlab_rejected(exc) from exc
+    await enqueue_targeted(str(project.id), "issue", item.gitlab_iid, delay=0)
     return {"ok": True}
 
 
@@ -247,6 +249,7 @@ async def comment_on_merge_request(
         await add_note(project, "merge_requests", mr.gitlab_iid, body.body, access_token)
     except httpx.HTTPStatusError as exc:
         raise _gitlab_rejected(exc) from exc
+    await enqueue_targeted(str(project.id), "merge_request", mr.gitlab_iid, delay=0)
     return {"ok": True}
 
 
@@ -292,4 +295,5 @@ async def request_review(
         .on_conflict_do_nothing(index_elements=[MergeRequestReviewer.merge_request_id, MergeRequestReviewer.user_id])
     )
     await db.commit()
+    await enqueue_targeted(str(project.id), "merge_request", mr.gitlab_iid, delay=0)
     return {"ok": True}

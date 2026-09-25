@@ -141,7 +141,7 @@ async def _upsert_issues_rest(
             gitlab_iid=str(item["iid"]),
             title=item["title"],
             description=item.get("description"),
-            item_type="issue",  # classic API predates Work Item types (Section 9.3 note)
+            item_type=(item.get("issue_type") or "issue").lower(),
             state=WorkItemState.CLOSED if item["state"] == "closed" else WorkItemState.OPENED,
             web_url=item["web_url"],
             assignee_user_id=assignee.id if assignee else None,

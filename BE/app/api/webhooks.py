@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.synced_project import SyncedProject
+from app.sync.webhook_targets import webhook_target
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -29,10 +30,14 @@ async def gitlab_webhook(
     payload = await request.json()
     object_kind = payload.get("object_kind", "unknown")
 
-    # Deferred import: avoids importing the Huey/Redis stack into every request-handling
-    # process path that merely imports app.api.webhooks.
-    from app.workers.tasks import process_gitlab_webhook
+    # Deferred import: avoids pulling the Huey/Redis stack into every process that imports this module.
+    from app.workers.coalesce import enqueue_project, enqueue_targeted
 
-    process_gitlab_webhook(str(project.id), object_kind)
+    target = webhook_target(payload)
+    if target is not None:
+        await enqueue_targeted(str(project.id), *target)
+    elif object_kind not in ("pipeline", "push", "tag_push"):
+        # An event we don't know how to narrow down: fall back to a (batched) project refresh.
+        await enqueue_project(str(project.id), delay=2)
 
     return {"ok": True}

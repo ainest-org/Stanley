@@ -7,7 +7,9 @@ from sqlalchemy import select
 from app.models.synced_project import SyncedProject
 from app.sync.gitlab_client import GitLabRateLimited
 from app.sync.reconciliation import reconcile_project
+from app.sync.targeted import sync_single_item
 from app.workers.async_utils import run_async, worker_session
+from app.workers.coalesce import clear_marker, project_key, targeted_key
 from app.workers.huey_app import huey
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ def reconcile_one_project(project_id: str, attempt: int = 0) -> None:
     """Reconciles a single project (PRD Section 11.1). On a 429 from GitLab, backs off
     exponentially per-project (Section 13.1) instead of retrying immediately or failing the
     whole batch."""
+    clear_marker(project_key(project_id))
     try:
         run_async(_reconcile_one_project_async(project_id))
     except GitLabRateLimited as exc:
@@ -72,18 +75,27 @@ async def _record_backoff(project_id: str, backoff_seconds: int) -> None:
 
 
 @huey.task()
-def process_gitlab_webhook(synced_project_id: str, object_kind: str) -> None:
-    """Handle an inbound GitLab webhook event (PRD Section 11.1 primary path). Rather than
-    hand-parsing every event shape (work item / issue / MR / pipeline) into a partial update,
-    this triggers an immediate full reconciliation of the one project the event came from —
-    correctness over micro-efficiency; Section 13.1 already treats reconciliation as the
-    ground truth, so routing webhooks through the same path can't introduce drift.
+def sync_single_item_task(project_id: str, kind: str, iid: str, attempt: int = 0) -> None:
+    """Refresh one issue or merge request (webhooks and Stanley's own writes queue these through
+    `app.workers.coalesce`, which batches bursts). Cheap: one or two GitLab calls."""
+    clear_marker(targeted_key(project_id, kind, iid))
+    try:
+        run_async(_sync_single_async(project_id, kind, iid))
+    except GitLabRateLimited as exc:
+        if attempt >= 3:
+            logger.warning("Giving up targeted sync of %s !%s after repeated rate limits", kind, iid)
+            return
+        sync_single_item_task.schedule(args=(project_id, kind, iid, attempt + 1), delay=exc.retry_after_seconds)
 
-    TODO: once volume warrants it, add a lighter-weight targeted upsert per `object_kind`
-    instead of a full project re-pull.
-    """
-    logger.info("Processing GitLab webhook (%s) for project %s", object_kind, synced_project_id)
-    run_async(_reconcile_one_project_async(synced_project_id))
+
+async def _sync_single_async(project_id: str, kind: str, iid: str) -> None:
+    async with worker_session() as db:
+        project = await db.get(SyncedProject, uuid.UUID(project_id))
+        if project is None or not project.is_active:
+            return
+        found = await sync_single_item(db, project, kind, iid)
+        if not found:
+            logger.info("%s %s not found in GitLab; leaving it to the next reconciliation", kind, iid)
 
 
 @huey.periodic_task(crontab(minute="0", hour="9", day_of_week="1"))

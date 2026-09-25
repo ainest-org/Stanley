@@ -25,7 +25,7 @@ from app.models.merge_request_reviewer import MergeRequestReviewer
 from app.models.milestone import Milestone
 from app.models.organization import Organization
 from app.models.synced_project import SyncedProject
-from app.models.user import User, is_placeholder_username
+from app.models.user import InToolRole, User, is_placeholder_username
 from app.models.work_item import WorkItem, work_item_labels
 from app.services.health import days_since, is_stale, is_work_item_flagged
 
@@ -145,8 +145,14 @@ async def build_team_board(db: AsyncSession, org: Organization, filters: TeamBoa
     overloaded_engineers = []
 
     for user in users:
-        items = sorted(filtered_by_assignee.get(user.id, []), key=lambda i: i.last_activity_at, reverse=True)
+        # Problem items first (blocked, then flagged), then the most recently active.
+        items = sorted(
+            filtered_by_assignee.get(user.id, []),
+            key=lambda i: (i.id not in active_blocked_item_ids, not is_flagged(i), -i.last_activity_at.timestamp()),
+        )
         total_active = len(all_by_assignee.get(user.id, []))
+        if total_active == 0 and user.in_tool_role != InToolRole.ENGINEER:
+            continue  # managers, admins and execs with no assigned work aren't "idle", they just aren't on the board
 
         if total_active == 0:
             idle_engineers.append({"user_id": str(user.id), "name": user.name})

@@ -15,7 +15,7 @@ from app.models.merge_request import MergeRequest, merge_request_work_items
 from app.models.milestone import Milestone
 from app.models.organization import Organization
 from app.models.synced_project import SyncedProject
-from app.models.user import User, is_placeholder_username
+from app.models.user import InToolRole, User, is_placeholder_username
 from app.models.work_item import WorkItem
 from app.services.health import days_since
 
@@ -199,6 +199,7 @@ async def _build_people(db: AsyncSession, org: Organization) -> list[dict]:
             "blocked_count": blocked_count_by_user.get(user.id, 0),
         }
         for user in users
+        if user.in_tool_role == InToolRole.ENGINEER or active_count_by_user.get(user.id, 0) > 0
     ]
 
 

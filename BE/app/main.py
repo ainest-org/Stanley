@@ -7,6 +7,7 @@ from app.api.my_dashboard import router as my_dashboard_router
 from app.api.my_work import router as my_work_router
 from app.api.radar import router as radar_router
 from app.api.standups import router as standups_router
+from app.api.sync_status import router as sync_status_router
 from app.api.team_board import router as team_board_router
 from app.api.webhooks import router as webhooks_router
 from app.api.work_item_actions import router as work_item_actions_router
@@ -30,6 +31,7 @@ app.include_router(admin_router)
 app.include_router(my_work_router)
 app.include_router(my_dashboard_router)
 app.include_router(team_board_router)
+app.include_router(sync_status_router)
 app.include_router(standups_router)
 app.include_router(radar_router)
 app.include_router(work_item_actions_router)

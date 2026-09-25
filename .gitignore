@@ -1,0 +1,16 @@
+# Node / Next.js (fe/)
+fe/node_modules/
+fe/.next/
+fe/.env
+fe/.env.local
+
+# Python (BE/)
+BE/.venv/
+BE/__pycache__/
+BE/**/__pycache__/
+BE/.env
+BE/*.egg-info/
+
+# General
+.DS_Store
+*.log

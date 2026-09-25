@@ -1,0 +1,79 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pmtool
+      POSTGRES_PASSWORD: pmtool
+      POSTGRES_DB: pmtool
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmtool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./BE
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./BE/.env
+    environment:
+      # Override .env's host-machine connection strings with in-network service hostnames —
+      # takes precedence over env_file, so BE/.env itself doesn't need to change per environment.
+      DATABASE_URL: postgresql+asyncpg://pmtool:pmtool@db:5432/pmtool
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./BE
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    env_file:
+      - ./BE/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pmtool:pmtool@db:5432/pmtool
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./fe
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./fe/.env
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:

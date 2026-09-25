@@ -33,3 +33,11 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.in_tool_role != InToolRole.ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin role required")
     return current_user
+
+
+async def require_manager(current_user: User = Depends(get_current_user)) -> User:
+    """Managers and admins only (in-tool roles, PRD Section 3): the standup digest reads other
+    people's check-ins."""
+    if current_user.in_tool_role not in (InToolRole.MANAGER, InToolRole.ADMIN):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Manager role required")
+    return current_user

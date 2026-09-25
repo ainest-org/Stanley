@@ -15,6 +15,9 @@ from app.models.project_membership import ProjectMembership
 from app.models.synced_project import SyncedProject
 from app.models.work_item import WorkItem, work_item_labels
 from app.core.config import get_settings
+from app.sync.gid import parse_date, parse_dt
+from app.sync.mr_link_store import set_links
+from app.sync.mr_links import linked_work_item_ids
 from app.sync.gitlab_client import GitLabClient
 from app.sync.reconciliation import _get_or_create_user_stub
 
@@ -54,16 +57,16 @@ async def _upsert_milestones_rest(db: AsyncSession, project: SyncedProject, item
                 gitlab_milestone_id=gitlab_id,
                 title=item["title"],
                 state=item.get("state", "active"),
-                starts_at=item.get("start_date"),
-                due_at=item.get("due_date"),
+                starts_at=parse_date(item.get("start_date")),
+                due_at=parse_date(item.get("due_date")),
             )
             .on_conflict_do_update(
                 index_elements=[Milestone.gitlab_milestone_id],
                 set_={
                     "title": item["title"],
                     "state": item.get("state", "active"),
-                    "starts_at": item.get("start_date"),
-                    "due_at": item.get("due_date"),
+                    "starts_at": parse_date(item.get("start_date")),
+                    "due_at": parse_date(item.get("due_date")),
                 },
             )
             .returning(Milestone.id)
@@ -144,10 +147,10 @@ async def _upsert_issues_rest(
             assignee_user_id=assignee.id if assignee else None,
             author_user_id=author.id if author else None,
             milestone_id=milestone_id,
-            gitlab_created_at=item["created_at"],
-            gitlab_updated_at=item["updated_at"],
-            closed_at=item.get("closed_at"),
-            last_activity_at=item["updated_at"],
+            gitlab_created_at=parse_dt(item["created_at"]),
+            gitlab_updated_at=parse_dt(item["updated_at"]),
+            closed_at=parse_dt(item.get("closed_at")),
+            last_activity_at=parse_dt(item["updated_at"]),
         )
         stmt = (
             pg_insert(WorkItem)
@@ -193,7 +196,6 @@ async def _upsert_merge_requests_rest(
 
         values = dict(
             synced_project_id=project.id,
-            work_item_id=work_item_id_by_iid.get(str(item["iid"])),
             gitlab_global_id=gitlab_id,
             gitlab_iid=str(item["iid"]),
             title=item["title"],
@@ -205,10 +207,10 @@ async def _upsert_merge_requests_rest(
             has_unresolved_threads=False,  # TODO: GET .../discussions to populate accurately
             approvals_required=None,
             approvals_received=0,
-            gitlab_created_at=item["created_at"],
-            gitlab_updated_at=item["updated_at"],
-            merged_at=item.get("merged_at"),
-            last_activity_at=item["updated_at"],
+            gitlab_created_at=parse_dt(item["created_at"]),
+            gitlab_updated_at=parse_dt(item["updated_at"]),
+            merged_at=parse_dt(item.get("merged_at")),
+            last_activity_at=parse_dt(item["updated_at"]),
         )
         stmt = (
             pg_insert(MergeRequest)
@@ -218,6 +220,11 @@ async def _upsert_merge_requests_rest(
         )
         result = await db.execute(stmt)
         merge_request_id = result.scalar_one()
+        await set_links(
+            db,
+            merge_request_id,
+            linked_work_item_ids(item.get("title"), item.get("description"), work_item_id_by_iid),
+        )
 
         for reviewer_item in item.get("reviewers", []):
             reviewer = await _get_or_create_user_stub(db, project.organization_id, _rest_user_to_graphql_shape(reviewer_item))

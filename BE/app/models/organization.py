@@ -23,3 +23,7 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     blocked_recheck_days: Mapped[int] = mapped_column(default=5)
     review_sla_days: Mapped[int] = mapped_column(default=2)
     overloaded_item_threshold: Mapped[int] = mapped_column(default=5)
+
+    # A GitLab label (e.g. "status::doing") that marks a work item as in progress. Lets My Work's
+    # "Doing now" reflect work that has no draft MR yet (PRD 5.2 step 4, label mapping).
+    in_progress_label: Mapped[str | None] = mapped_column(String(255), nullable=True)

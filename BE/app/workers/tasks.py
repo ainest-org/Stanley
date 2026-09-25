@@ -1,13 +1,13 @@
 import logging
+import uuid
 
 from huey import crontab
 from sqlalchemy import select
 
-from app.db.session import AsyncSessionLocal
 from app.models.synced_project import SyncedProject
 from app.sync.gitlab_client import GitLabRateLimited
 from app.sync.reconciliation import reconcile_project
-from app.workers.async_utils import run_async
+from app.workers.async_utils import run_async, worker_session
 from app.workers.huey_app import huey
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def reconcile_synced_projects() -> None:
 
 
 async def _enqueue_reconciliation_for_active_projects() -> None:
-    async with AsyncSessionLocal() as db:
+    async with worker_session() as db:
         result = await db.execute(select(SyncedProject.id).where(SyncedProject.is_active.is_(True)))
         project_ids = [str(row) for row in result.scalars().all()]
 
@@ -55,16 +55,16 @@ def reconcile_one_project(project_id: str, attempt: int = 0) -> None:
 
 
 async def _reconcile_one_project_async(project_id: str) -> None:
-    async with AsyncSessionLocal() as db:
-        project = await db.get(SyncedProject, project_id)
+    async with worker_session() as db:
+        project = await db.get(SyncedProject, uuid.UUID(project_id))
         if project is None or not project.is_active:
             return
         await reconcile_project(db, project)
 
 
 async def _record_backoff(project_id: str, backoff_seconds: int) -> None:
-    async with AsyncSessionLocal() as db:
-        project = await db.get(SyncedProject, project_id)
+    async with worker_session() as db:
+        project = await db.get(SyncedProject, uuid.UUID(project_id))
         if project is None:
             return
         project.reconciliation_backoff_seconds = backoff_seconds

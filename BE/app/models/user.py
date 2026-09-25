@@ -19,6 +19,15 @@ class InToolRole(str, enum.Enum):
     ADMIN = "admin"
 
 
+PLACEHOLDER_USERNAME_MARKER = "_placeholder_"
+
+
+def is_placeholder_username(username: str) -> bool:
+    """GitLab creates "placeholder" users during project imports for contributors who haven't
+    been mapped to a real account. They aren't people, so they're excluded from sync and UI."""
+    return PLACEHOLDER_USERNAME_MARKER in (username or "")
+
+
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 

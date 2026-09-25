@@ -9,7 +9,7 @@ from app.auth.dependencies import require_admin
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.synced_project import SyncedProject
-from app.models.user import InToolRole, User
+from app.models.user import InToolRole, User, is_placeholder_username
 from app.sync.gitlab_client import GitLabClient
 from app.sync.webhook_registration import register_webhook, unregister_webhook
 
@@ -224,7 +224,7 @@ async def list_members(current_user: User = Depends(require_admin), db: AsyncSes
     """Members auto-pulled from synced projects (via reconciliation's membership upsert) plus
     anyone who has already signed in (Section 5.2 step 3)."""
     result = await db.execute(select(User).where(User.organization_id == current_user.organization_id))
-    users = result.scalars().all()
+    users = [u for u in result.scalars().all() if not is_placeholder_username(u.gitlab_username)]
 
     return [
         {
@@ -280,6 +280,7 @@ def _serialize_settings(organization) -> dict:
         "blocked_recheck_days": organization.blocked_recheck_days,
         "review_sla_days": organization.review_sla_days,
         "overloaded_item_threshold": organization.overloaded_item_threshold,
+        "in_progress_label": organization.in_progress_label,
     }
 
 
@@ -297,6 +298,7 @@ class UpdateSettingsRequest(BaseModel):
     blocked_recheck_days: int | None = None
     review_sla_days: int | None = None
     overloaded_item_threshold: int | None = None
+    in_progress_label: str | None = None  # empty string clears it
 
 
 @router.patch("/settings")
@@ -309,6 +311,8 @@ async def update_org_settings(
 
     organization = await db.get(Organization, current_user.organization_id)
     for field, value in body.model_dump(exclude_none=True).items():
+        if field == "in_progress_label":
+            value = value.strip() or None
         setattr(organization, field, value)
 
     await db.commit()

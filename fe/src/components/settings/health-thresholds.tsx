@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchOrgSettings, updateOrgSettings, type OrgSettings } from "@/lib/admin-api";
 
-const FIELDS: { key: keyof OrgSettings; label: string; help: string }[] = [
+const FIELDS: { key: Exclude<keyof OrgSettings, "in_progress_label">; label: string; help: string }[] = [
   {
     key: "stale_threshold_days",
     label: "Stale after (days)",
@@ -91,6 +91,18 @@ export function HealthThresholds() {
             <p className="text-xs text-muted-foreground">{field.help}</p>
           </div>
         ))}
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor="in_progress_label">In-progress label</Label>
+          <Input
+            id="in_progress_label"
+            placeholder="e.g. status::doing (leave empty for none)"
+            value={form.in_progress_label ?? ""}
+            onChange={(e) => setForm({ ...form, in_progress_label: e.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Work items with this GitLab label show under &quot;Doing now&quot; on My Work, even without a draft merge request.
+          </p>
+        </div>
       </CardContent>
       <CardFooter className="justify-end gap-2">
         {mutation.isSuccess && <p className="text-sm text-muted-foreground">Saved.</p>}

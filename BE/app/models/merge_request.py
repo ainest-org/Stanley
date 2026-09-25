@@ -1,13 +1,22 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
 from app.models.enums import MergeRequestState, PipelineStatus
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+# A work item can have many merge requests, and one merge request can serve several work items.
+merge_request_work_items = Table(
+    "merge_request_work_items",
+    Base.metadata,
+    Column("merge_request_id", UUID(as_uuid=True), ForeignKey("merge_requests.id"), primary_key=True),
+    Column("work_item_id", UUID(as_uuid=True), ForeignKey("work_items.id"), primary_key=True),
+)
 
 
 class MergeRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -17,9 +26,6 @@ class MergeRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "merge_requests"
 
     synced_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("synced_projects.id"))
-    work_item_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("work_items.id"), nullable=True
-    )
 
     gitlab_global_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     gitlab_iid: Mapped[str] = mapped_column(String(32))

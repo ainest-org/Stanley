@@ -49,14 +49,15 @@ query($fullPath: ID!) {
         id
         iid
         title
+        description
         state
         draft
         webUrl
         createdAt
         updatedAt
         mergedAt
-        approvalsRequired
-        approvalsLeft
+        approved
+        approvedBy { nodes { id } }
         author { id username name publicEmail avatarUrl }
         reviewers { nodes { id username name publicEmail avatarUrl } }
         headPipeline { status }

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.auth.tokens import token_expiry_iso
 from app.auth.gitlab_oauth import build_authorize_url, exchange_code_for_token, fetch_gitlab_user
 from app.core.config import get_settings
 from app.core.org import get_or_create_default_organization
@@ -60,6 +61,7 @@ async def callback(
 
     encrypted_access = encrypt_token(access_token)
     encrypted_refresh = encrypt_token(refresh_token) if refresh_token else None
+    expires_at = token_expiry_iso(token_data)
 
     if user is None:
         # Nobody has ever signed in for this org yet (first-run) — that person needs Admin to
@@ -76,6 +78,7 @@ async def callback(
             avatar_url=gitlab_user.get("avatar_url"),
             encrypted_access_token=encrypted_access,
             encrypted_refresh_token=encrypted_refresh,
+            token_expires_at=expires_at,
             in_tool_role=InToolRole.ADMIN if is_first_user else InToolRole.ENGINEER,
         )
         db.add(user)
@@ -86,6 +89,7 @@ async def callback(
         user.avatar_url = gitlab_user.get("avatar_url")
         user.encrypted_access_token = encrypted_access
         user.encrypted_refresh_token = encrypted_refresh
+        user.token_expires_at = expires_at
 
     await db.commit()
     await db.refresh(user)

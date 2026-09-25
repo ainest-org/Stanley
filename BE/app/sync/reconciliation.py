@@ -7,21 +7,24 @@ with whatever a webhook handler wrote in between.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.enums import GitLabAccessLevel, MergeRequestState, PipelineStatus, WorkItemState
+from app.models.enums import GitLabAccessLevel, MergeRequestState, PipelineStatus, ReviewState, WorkItemState
 from app.models.label import Label
 from app.models.merge_request import MergeRequest
 from app.models.merge_request_reviewer import MergeRequestReviewer
 from app.models.milestone import Milestone
 from app.models.project_membership import ProjectMembership
 from app.models.synced_project import SyncedProject
-from app.models.user import User
+from app.models.user import User, is_placeholder_username
 from app.models.work_item import WorkItem, work_item_labels
 from app.sync.gid import extract_id
+from app.sync.gid import parse_date, parse_dt
+from app.sync.mr_link_store import set_links
+from app.sync.mr_links import linked_work_item_ids
 from app.sync.gitlab_client import GitLabClient
 from app.sync.queries import PROJECT_RECONCILE_QUERY
 
@@ -55,7 +58,7 @@ async def _get_or_create_user_stub(db: AsyncSession, organization_id, gitlab_use
     """Ensures a User row exists for someone GitLab reports as an assignee/author/member, even
     if they've never signed into this tool themselves (Section 11.4 — role assignment happens
     separately; this just gives us an FK target for work items/MRs/memberships)."""
-    if not gitlab_user:
+    if not gitlab_user or is_placeholder_username(gitlab_user.get("username", "")):
         return None
 
     gitlab_user_id = extract_id(gitlab_user["id"])
@@ -88,16 +91,16 @@ async def _upsert_milestones(db: AsyncSession, project: SyncedProject, nodes: li
                 gitlab_milestone_id=gitlab_id,
                 title=node["title"],
                 state=(node.get("state") or "active").lower(),
-                starts_at=node.get("startDate"),
-                due_at=node.get("dueDate"),
+                starts_at=parse_date(node.get("startDate")),
+                due_at=parse_date(node.get("dueDate")),
             )
             .on_conflict_do_update(
                 index_elements=[Milestone.gitlab_milestone_id],
                 set_={
                     "title": node["title"],
                     "state": (node.get("state") or "active").lower(),
-                    "starts_at": node.get("startDate"),
-                    "due_at": node.get("dueDate"),
+                    "starts_at": parse_date(node.get("startDate")),
+                    "due_at": parse_date(node.get("dueDate")),
                 },
             )
             .returning(Milestone.id)
@@ -198,10 +201,10 @@ async def _upsert_work_items(
             assignee_user_id=assignee.id if assignee else None,
             author_user_id=author.id if author else None,
             milestone_id=milestone_id,
-            gitlab_created_at=node["createdAt"],
-            gitlab_updated_at=node["updatedAt"],
-            closed_at=node.get("closedAt"),
-            last_activity_at=node["updatedAt"],
+            gitlab_created_at=parse_dt(node["createdAt"]),
+            gitlab_updated_at=parse_dt(node["updatedAt"]),
+            closed_at=parse_dt(node.get("closedAt")),
+            last_activity_at=parse_dt(node["updatedAt"]),
         )
 
         stmt = (
@@ -236,17 +239,11 @@ async def _upsert_merge_requests(
         gitlab_id = extract_id(node["id"])
         author = await _get_or_create_user_stub(db, project.organization_id, node.get("author"))
 
-        approvals_required = node.get("approvalsRequired")
-        approvals_left = node.get("approvalsLeft")
-        approvals_received = (
-            max(0, approvals_required - approvals_left)
-            if approvals_required is not None and approvals_left is not None
-            else 0
-        )
+        # This GitLab exposes only a boolean `approved`, not required/left counts.
+        approvals_received = 1 if node.get("approved") else 0
 
         values = dict(
             synced_project_id=project.id,
-            work_item_id=work_item_id_by_iid.get(str(node["iid"])),
             gitlab_global_id=gitlab_id,
             gitlab_iid=str(node["iid"]),
             title=node["title"],
@@ -256,12 +253,12 @@ async def _upsert_merge_requests(
             author_user_id=author.id if author else None,
             pipeline_status=_normalize_pipeline_status((node.get("headPipeline") or {}).get("status")),
             has_unresolved_threads=False,  # TODO: not covered by this pass's query yet
-            approvals_required=approvals_required,
+            approvals_required=None,
             approvals_received=approvals_received,
-            gitlab_created_at=node["createdAt"],
-            gitlab_updated_at=node["updatedAt"],
-            merged_at=node.get("mergedAt"),
-            last_activity_at=node["updatedAt"],
+            gitlab_created_at=parse_dt(node["createdAt"]),
+            gitlab_updated_at=parse_dt(node["updatedAt"]),
+            merged_at=parse_dt(node.get("mergedAt")),
+            last_activity_at=parse_dt(node["updatedAt"]),
         )
 
         stmt = (
@@ -272,18 +269,35 @@ async def _upsert_merge_requests(
         )
         result = await db.execute(stmt)
         merge_request_id = result.scalar_one()
+        await set_links(
+            db,
+            merge_request_id,
+            linked_work_item_ids(node.get("title"), node.get("description"), work_item_id_by_iid),
+        )
 
         reviewer_nodes = (node.get("reviewers") or {}).get("nodes", [])
+        approved_gitlab_ids = {extract_id(n["id"]) for n in (node.get("approvedBy") or {}).get("nodes", [])}
+        current_reviewer_ids = []
         for reviewer_node in reviewer_nodes:
             reviewer = await _get_or_create_user_stub(db, project.organization_id, reviewer_node)
             if not reviewer:
                 continue
+            current_reviewer_ids.append(reviewer.id)
+            state = ReviewState.APPROVED if reviewer.gitlab_user_id in approved_gitlab_ids else ReviewState.REQUESTED
             stmt = (
                 pg_insert(MergeRequestReviewer)
-                .values(merge_request_id=merge_request_id, user_id=reviewer.id)
-                .on_conflict_do_nothing(index_elements=[MergeRequestReviewer.merge_request_id, MergeRequestReviewer.user_id])
+                .values(merge_request_id=merge_request_id, user_id=reviewer.id, state=state)
+                .on_conflict_do_update(
+                    index_elements=[MergeRequestReviewer.merge_request_id, MergeRequestReviewer.user_id],
+                    set_={"state": state},
+                )
             )
             await db.execute(stmt)
+        await db.execute(
+            delete(MergeRequestReviewer)
+            .where(MergeRequestReviewer.merge_request_id == merge_request_id)
+            .where(MergeRequestReviewer.user_id.notin_(current_reviewer_ids))
+        )
 
 
 async def _reconcile_project_via_graphql(db: AsyncSession, project: SyncedProject) -> None:

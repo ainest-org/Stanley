@@ -6,6 +6,7 @@ endpoint isn't built yet, but this is the piece it will call.
 
 import secrets
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -19,20 +20,20 @@ async def register_webhook(db: AsyncSession, project: SyncedProject) -> None:
     client = GitLabClient(access_token=settings.gitlab_sync_service_token)
     secret_token = secrets.token_urlsafe(32)
 
-    response = await client.rest_post(
-        f"/projects/{project.gitlab_project_id}/hooks",
-        json={
-            "url": f"{settings.backend_base_url}/api/webhooks/gitlab/{project.id}",
-            "token": secret_token,
-            "issues_events": True,
-            "merge_requests_events": True,
-            "pipeline_events": True,
-            # Work item events are the newer hook type; harmless to request on instances that
-            # predate it — GitLab ignores flags it doesn't recognize.
-            "work_item_events": True,
-            "enable_ssl_verification": settings.app_env != "development",
-        },
-    )
+    try:
+        response = await client.rest_post(
+            f"/projects/{project.gitlab_project_id}/hooks",
+            json={
+                "url": f"{settings.backend_base_url}/api/webhooks/gitlab/{project.id}",
+                "token": secret_token,
+                "issues_events": True,
+                "merge_requests_events": True,
+                "pipeline_events": True,
+                "enable_ssl_verification": settings.app_env != "development",
+            },
+        )
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(f"GitLab returned {exc.response.status_code}: {exc.response.text}") from exc
     hook = response.json()
 
     project.gitlab_webhook_id = str(hook["id"])

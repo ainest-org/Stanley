@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "PM Tool",
+  title: "Stanley",
   description: "GitLab-integrated project visibility tool",
 };
 

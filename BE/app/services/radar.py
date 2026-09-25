@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.blocked_flag import BlockedFlag
 from app.models.enums import MergeRequestState, WorkItemState
-from app.models.merge_request import MergeRequest
+from app.models.merge_request import MergeRequest, merge_request_work_items
 from app.models.milestone import Milestone
 from app.models.organization import Organization
 from app.models.synced_project import SyncedProject
-from app.models.user import User
+from app.models.user import User, is_placeholder_username
 from app.models.work_item import WorkItem
 from app.services.health import days_since
 
@@ -32,7 +32,8 @@ def _week_start(moment: datetime) -> datetime:
 async def _build_summary(db: AsyncSession) -> dict:
     open_items_with_mr = await db.execute(
         select(WorkItem.id)
-        .join(MergeRequest, MergeRequest.work_item_id == WorkItem.id)
+        .join(merge_request_work_items, merge_request_work_items.c.work_item_id == WorkItem.id)
+        .join(MergeRequest, MergeRequest.id == merge_request_work_items.c.merge_request_id)
         .where(WorkItem.state == WorkItemState.OPENED)
         .where(MergeRequest.state == MergeRequestState.OPENED)
         .distinct()
@@ -167,7 +168,11 @@ async def _build_blockers(db: AsyncSession) -> list[dict]:
 
 
 async def _build_people(db: AsyncSession, org: Organization) -> list[dict]:
-    users = (await db.execute(select(User).where(User.organization_id == org.id))).scalars().all()
+    users = [
+        u
+        for u in (await db.execute(select(User).where(User.organization_id == org.id))).scalars().all()
+        if not is_placeholder_username(u.gitlab_username)
+    ]
 
     open_items = (await db.execute(select(WorkItem).where(WorkItem.state == WorkItemState.OPENED))).scalars().all()
     active_blocked_item_ids = set(

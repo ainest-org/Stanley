@@ -88,6 +88,7 @@ export interface OrgSettings {
   blocked_recheck_days: number;
   review_sla_days: number;
   overloaded_item_threshold: number;
+  in_progress_label: string | null;
 }
 
 export function fetchOrgSettings(): Promise<OrgSettings> {

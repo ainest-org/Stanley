@@ -98,6 +98,14 @@ class GitLabClient:
         if response.status_code != 404:
             response.raise_for_status()
 
+    async def token_info(self) -> dict:
+        """GitLab's /oauth/token/info: {"scope": [...], "expires_in_seconds": N, ...}. Raises
+        HTTPStatusError(401) once the token has expired."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(f"{self._base_url}/oauth/token/info", headers=self._headers())
+        response.raise_for_status()
+        return response.json()
+
     async def supports_work_items_api(self, project_full_path: str) -> bool:
         """Detected at setup (PRD Section 5.2 step 1 / 13.1 last row): older self-hosted GitLab
         instances lack the Work Items API and must fall back to the classic Issues API."""

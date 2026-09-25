@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     gitlab_oauth_client_id: str = ""
     gitlab_oauth_client_secret: str = ""
     gitlab_oauth_redirect_uri: str = "http://localhost:8000/api/auth/callback"
-    gitlab_oauth_scopes: str = "read_api read_user"
+    gitlab_oauth_scopes: str = "api read_user"
 
     # Org-wide service account token used by the sync engine's background jobs (webhook
     # processing, reconciliation) — never a per-user token, per NFR Section 14.

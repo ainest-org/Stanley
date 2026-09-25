@@ -8,7 +8,7 @@ export default function LoginPage() {
     <main className="flex flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>GitLab-Integrated PM Tool</CardTitle>
+          <CardTitle>Stanley</CardTitle>
           <CardDescription>
             Sign in with your GitLab account. Your access here always mirrors what you can
             already see and do in GitLab.

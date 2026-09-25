@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,23 +37,9 @@ const FIELDS: { key: Exclude<keyof OrgSettings, "in_progress_label">; label: str
 ];
 
 export function HealthThresholds() {
-  const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["org-settings"], queryFn: fetchOrgSettings });
-  const [form, setForm] = useState<OrgSettings | null>(null);
 
-  useEffect(() => {
-    if (data) setForm(data);
-  }, [data]);
-
-  const mutation = useMutation({
-    mutationFn: (patch: Partial<OrgSettings>) => updateOrgSettings(patch),
-    onSuccess: (updated) => {
-      setForm(updated);
-      queryClient.setQueryData(["org-settings"], updated);
-    },
-  });
-
-  if (!form) {
+  if (!data) {
     return (
       <Card>
         <CardHeader>
@@ -65,6 +51,21 @@ export function HealthThresholds() {
       </Card>
     );
   }
+
+  return <ThresholdsForm initial={data} />;
+}
+
+function ThresholdsForm({ initial }: { initial: OrgSettings }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<OrgSettings>(initial);
+
+  const mutation = useMutation({
+    mutationFn: (patch: Partial<OrgSettings>) => updateOrgSettings(patch),
+    onSuccess: (updated) => {
+      setForm(updated);
+      queryClient.setQueryData(["org-settings"], updated);
+    },
+  });
 
   return (
     <Card>

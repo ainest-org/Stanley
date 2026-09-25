@@ -1,99 +1,74 @@
 "use client";
 
 import { useState } from "react";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PageHeader } from "@/components/layout/page-header";
 import { CreateWorkItemDialog } from "@/components/dashboard/create-work-item-dialog";
-import { ApiError } from "@/lib/api";
-import { Pick } from "@/components/ui/pick";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { fetchAllMembers } from "@/lib/actions-api";
 import { WorkItemPanel } from "@/components/dashboard/work-item-panel";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Pick } from "@/components/ui/pick";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { Switch } from "@/components/ui/switch";
+import { fetchAllMembers } from "@/lib/actions-api";
 import {
   NO_FILTERS,
   fetchBoardFilterOptions,
   fetchTeamBoard,
-  reassignWorkItem,
   type Swimlane,
+  type TeamBoard,
   type TeamBoardFilters,
 } from "@/lib/dashboard-api";
+import { cn } from "@/lib/utils";
+
+const ALL = "all";
 
 export default function TeamBoardPage() {
   const [filters, setFilters] = useState<TeamBoardFilters>(NO_FILTERS);
   const [openItemId, setOpenItemId] = useState<string | null>(null);
-  const queryKey = ["team-board"];
   const { data, isLoading } = useQuery({
-    queryKey: [...queryKey, filters],
+    queryKey: ["team-board", filters],
     queryFn: () => fetchTeamBoard(filters),
     placeholderData: keepPreviousData,
   });
-  const allMembers = useQuery({ queryKey: ["members"], queryFn: fetchAllMembers }).data ?? [];
   const filterOptions = useQuery({ queryKey: ["team-board-filters"], queryFn: fetchBoardFilterOptions });
-  const queryClient = useQueryClient();
-
-  const reassignMutation = useMutation({
-    mutationFn: ({ itemId, assigneeId }: { itemId: string; assigneeId: string }) =>
-      reassignWorkItem(itemId, assigneeId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
-  });
+  const members = useQuery({ queryKey: ["members"], queryFn: fetchAllMembers }).data ?? [];
 
   return (
     <AppShell>
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold mb-1">Team Board</h1>
-        <p className="text-sm text-muted-foreground">
-          One lane per person, not a status board — see PRD Section 7 for why.
-        </p>
-      </div>
+      <PageHeader
+        title="Team Board"
+        description="One lane per person. Click any item to see it, reassign it or comment."
+      />
 
       <FilterBar filters={filters} onChange={setFilters} options={filterOptions.data} />
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
-      {reassignMutation.isError && (
-        <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          {reassignErrorMessage(reassignMutation.error)}
-        </p>
-      )}
-
       {data && (
-        <div className="space-y-6">
-          <AttentionStrip board={data} />
+        <div className="space-y-4">
+          <AttentionCard board={data} onOpenItem={setOpenItemId} />
 
           <div className="space-y-3">
             {data.swimlanes.map((lane) => (
-              <SwimlaneRow
-                key={lane.user_id}
-                lane={lane}
-                allMembers={allMembers}
-                onReassign={(itemId, assigneeId) => reassignMutation.mutate({ itemId, assigneeId })}
-                onOpen={setOpenItemId}
-                pending={reassignMutation.isPending}
-              />
+              <Lane key={lane.user_id} lane={lane} onOpenItem={setOpenItemId} />
             ))}
             {data.swimlanes.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing matches these filters.</p>
+              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                Nothing matches these filters.
+              </p>
             )}
           </div>
         </div>
       )}
 
-      <WorkItemPanel
-        itemId={openItemId}
-        onClose={() => setOpenItemId(null)}
-        members={allMembers}
-      />
+      <WorkItemPanel itemId={openItemId} onClose={() => setOpenItemId(null)} members={members} />
     </AppShell>
   );
 }
-
-const ALL = "all";
 
 function FilterBar({
   filters,
@@ -107,7 +82,7 @@ function FilterBar({
   const active = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3">
+    <div className="mb-4 flex flex-wrap items-center gap-2">
       <Pick
         className="w-44"
         value={filters.projectId ?? ALL}
@@ -129,7 +104,7 @@ function FilterBar({
         options={[{ value: ALL, label: "All labels" }, ...(options?.labels ?? []).map((l) => ({ value: l, label: l }))]}
         placeholder="Label"
       />
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pl-1">
         <Switch
           id="flagged-only"
           checked={filters.flaggedOnly}
@@ -141,144 +116,147 @@ function FilterBar({
       </div>
       {active && (
         <Button size="sm" variant="ghost" onClick={() => onChange(NO_FILTERS)}>
-          Clear filters
+          Clear
         </Button>
       )}
     </div>
   );
 }
 
-function reassignErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    try {
-      return JSON.parse(error.message).detail ?? error.message;
-    } catch {
-      return error.message;
-    }
-  }
-  return "Reassignment failed";
-}
-
-function AttentionStrip({ board }: { board: Awaited<ReturnType<typeof fetchTeamBoard>> }) {
-  const { attention } = board;
-  const hasAny =
-    attention.stalled_mrs.length > 0 ||
-    attention.unassigned_items.length > 0 ||
-    attention.reviews_pending_sla.length > 0 ||
-    attention.idle_engineers.length > 0 ||
-    attention.overloaded_engineers.length > 0;
-
-  if (!hasAny) return null;
-
+function AttentionRow({ label, tone, children }: { label: string; tone: "danger" | "warning" | "info" | "neutral"; children: React.ReactNode }) {
   return (
-    <Card className="border-amber-400/50">
-      <CardHeader>
-        <CardTitle className="text-base">Needs your attention</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-wrap gap-2 text-sm">
-        {attention.stalled_mrs.map((mr) => (
-          <a key={mr.id} href={mr.web_url} target="_blank" rel="noreferrer">
-            <Badge variant="outline">Stalled MR: {mr.title}</Badge>
-          </a>
-        ))}
-        {attention.unassigned_items.map((item) => (
-          <a key={item.id} href={item.web_url} target="_blank" rel="noreferrer">
-            <Badge variant="outline">Unassigned: {item.title}</Badge>
-          </a>
-        ))}
-        {attention.reviews_pending_sla.map((mr) => (
-          <a key={mr.id} href={mr.web_url} target="_blank" rel="noreferrer">
-            <Badge variant="destructive">Review overdue: {mr.title}</Badge>
-          </a>
-        ))}
-        {attention.idle_engineers.map((person) => (
-          <Badge key={person.user_id} variant="secondary">
-            Idle: {person.name}
-          </Badge>
-        ))}
-        {attention.overloaded_engineers.map((person) => (
-          <Badge key={person.user_id} variant="secondary">
-            Overloaded: {person.name} ({person.active_count})
-          </Badge>
-        ))}
-      </CardContent>
-    </Card>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
+      <StatusBadge tone={tone} className="w-28 justify-center">
+        {label}
+      </StatusBadge>
+      <div className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1 text-sm">{children}</div>
+    </div>
   );
 }
 
-function SwimlaneRow({
-  lane,
-  allMembers,
-  onReassign,
-  onOpen,
-  pending,
-}: {
-  lane: Swimlane;
-  allMembers: { id: string; name: string }[];
-  onReassign: (itemId: string, assigneeId: string) => void;
-  onOpen: (itemId: string) => void;
-  pending: boolean;
-}) {
+function AttentionCard({ board, onOpenItem }: { board: TeamBoard; onOpenItem: (id: string) => void }) {
+  const { stalled_mrs, unassigned_items, reviews_pending_sla, idle_engineers, overloaded_engineers } = board.attention;
+  const total =
+    stalled_mrs.length +
+    unassigned_items.length +
+    reviews_pending_sla.length +
+    idle_engineers.length +
+    overloaded_engineers.length;
+  if (total === 0) return null;
+
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start">
-        <div className="flex w-48 shrink-0 items-center gap-2">
-          <Avatar className="h-7 w-7">
-            <AvatarImage src={lane.avatar_url ?? undefined} alt={lane.name} />
-            <AvatarFallback>{lane.name.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="text-sm font-medium leading-none">{lane.name}</p>
-            <div className="mt-1 flex gap-1">
-              {lane.blocked_count > 0 && (
-                <Badge variant="destructive" className="text-xs">
-                  {lane.blocked_count} blocked
-                </Badge>
-              )}
-              {lane.stale_count > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {lane.stale_count} stale
-                </Badge>
-              )}
-            </div>
+    <div className="space-y-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <div className="flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+        <AlertTriangle className="size-4" />
+        Needs your attention
+        <span className="text-xs font-normal opacity-80">{total}</span>
+      </div>
+
+      {unassigned_items.length > 0 && (
+        <AttentionRow label="Unassigned" tone="warning">
+          {unassigned_items.map((item) => (
+            <button key={item.id} type="button" className="text-left font-medium hover:underline" onClick={() => onOpenItem(item.id)}>
+              {item.title}
+            </button>
+          ))}
+        </AttentionRow>
+      )}
+      {reviews_pending_sla.length > 0 && (
+        <AttentionRow label="Review overdue" tone="danger">
+          {reviews_pending_sla.map((mr) => (
+            <a key={`${mr.id}-${mr.reviewer_name}`} href={mr.web_url} target="_blank" rel="noreferrer" className="hover:underline">
+              <span className="font-medium">{mr.title}</span>
+              <span className="text-muted-foreground"> · {mr.reviewer_name}, {mr.days_pending}d</span>
+            </a>
+          ))}
+        </AttentionRow>
+      )}
+      {stalled_mrs.length > 0 && (
+        <AttentionRow label="Stalled MRs" tone="warning">
+          {stalled_mrs.map((mr) => (
+            <a key={mr.id} href={mr.web_url} target="_blank" rel="noreferrer" className="hover:underline">
+              <span className="font-medium">{mr.title}</span>
+              <span className="text-muted-foreground"> · {mr.days_inactive}d quiet</span>
+            </a>
+          ))}
+        </AttentionRow>
+      )}
+      {overloaded_engineers.length > 0 && (
+        <AttentionRow label="Overloaded" tone="danger">
+          {overloaded_engineers.map((p) => (
+            <span key={p.user_id}>
+              <span className="font-medium">{p.name}</span>
+              <span className="text-muted-foreground"> · {p.active_count} active</span>
+            </span>
+          ))}
+        </AttentionRow>
+      )}
+      {idle_engineers.length > 0 && (
+        <AttentionRow label="Idle" tone="neutral">
+          {idle_engineers.map((p) => (
+            <span key={p.user_id} className="font-medium">
+              {p.name}
+            </span>
+          ))}
+        </AttentionRow>
+      )}
+    </div>
+  );
+}
+
+const MAX_SHOWN = 3;
+
+function Lane({ lane, onOpenItem }: { lane: Swimlane; onOpenItem: (id: string) => void }) {
+  const hidden = lane.active_count - lane.items.length;
+
+  return (
+    <div className="grid gap-3 rounded-xl border bg-card p-4 shadow-xs md:grid-cols-[15rem_1fr]">
+      <div className="flex items-start gap-3">
+        <Avatar className="size-9">
+          <AvatarImage src={lane.avatar_url ?? undefined} alt={lane.name} />
+          <AvatarFallback>{lane.name.slice(0, 1)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 space-y-1.5">
+          <p className="truncate text-sm font-semibold leading-tight">{lane.name}</p>
+          <div className="flex flex-wrap gap-1">
+            <StatusBadge>{lane.active_count} active</StatusBadge>
+            {lane.blocked_count > 0 && <StatusBadge tone="danger">{lane.blocked_count} blocked</StatusBadge>}
+            {lane.stale_count > 0 && <StatusBadge tone="warning">{lane.stale_count} stale</StatusBadge>}
           </div>
         </div>
+      </div>
 
-        <div className="flex flex-1 flex-wrap gap-2">
-          {lane.items.length === 0 && <p className="text-xs text-muted-foreground">No active items.</p>}
+      <div className="min-w-0 space-y-1">
+        {lane.items.length === 0 && <p className="py-1.5 text-sm text-muted-foreground">No active items.</p>}
+        {lane.items.slice(0, MAX_SHOWN).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onOpenItem(item.id)}
+            className="flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted"
+          >
+            <span
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                item.is_blocked ? "bg-red-500" : item.is_stale || item.is_flagged ? "bg-amber-400" : "bg-slate-300 dark:bg-slate-600",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate font-medium">{item.title}</span>
+            {item.is_blocked && <StatusBadge tone="danger">Blocked</StatusBadge>}
+            {!item.is_blocked && item.is_stale && <StatusBadge tone="warning">Stale</StatusBadge>}
+            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{item.project_name}</span>
+          </button>
+        ))}
+        <div className="flex items-center gap-3 px-1.5 pt-0.5">
+          {hidden > 0 && <span className="text-xs text-muted-foreground">+{hidden} more</span>}
           <CreateWorkItemDialog
             defaultAssigneeId={lane.user_id}
-            triggerLabel="+ Add"
+            triggerLabel={`+ Add for ${lane.name.split(" ")[0]}`}
             triggerVariant="ghost"
             triggerSize="xs"
           />
-          {lane.items.map((item) => (
-            <div
-              key={item.id}
-              className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${
-                item.is_blocked || item.is_flagged && !item.is_stale ? "border-destructive/40" : item.is_stale ? "border-amber-400/50" : ""
-              }`}
-            >
-              <button type="button" onClick={() => onOpen(item.id)} className="text-left hover:underline">
-                {item.title}
-              </button>
-              <span className="text-muted-foreground">· {item.project_name}</span>
-              <Select disabled={pending} onValueChange={(assigneeId) => onReassign(item.id, assigneeId as string)}>
-                <SelectTrigger size="sm" className="h-6 w-28 text-xs">
-                  <SelectValue placeholder="Reassign…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allMembers.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ))}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

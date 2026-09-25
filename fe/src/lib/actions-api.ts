@@ -64,20 +64,23 @@ export function errorMessage(error: unknown): string {
 }
 
 export interface LinkableMergeRequest {
-  id: string;
-  title: string;
   iid: string;
+  title: string;
   author: string | null;
   mine: boolean;
+  web_url: string;
+  synced: boolean;
 }
 
-export const fetchLinkableMergeRequests = (workItemId: string) =>
-  apiFetch<LinkableMergeRequest[]>(`/api/work-items/${workItemId}/linkable-merge-requests`);
+export const fetchLinkableMergeRequests = (workItemId: string, search: string) =>
+  apiFetch<{ project_name: string; live_error: string | null; merge_requests: LinkableMergeRequest[] }>(
+    `/api/work-items/${workItemId}/linkable-merge-requests?search=${encodeURIComponent(search)}`,
+  );
 
-export const linkMergeRequest = (workItemId: string, mergeRequestId: string, closes: boolean) =>
+export const linkMergeRequest = (workItemId: string, gitlabIid: string, closes: boolean) =>
   apiFetch<{ ok: boolean; linked_to_this_item: boolean; note: string | null }>(
     `/api/work-items/${workItemId}/merge-requests`,
-    { method: "POST", body: JSON.stringify({ merge_request_id: mergeRequestId, closes }) },
+    { method: "POST", body: JSON.stringify({ gitlab_iid: gitlabIid, closes }) },
   );
 
 export const unlinkMergeRequest = (workItemId: string, mergeRequestId: string) =>

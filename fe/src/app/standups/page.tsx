@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
 import { WorkItemPanel } from "@/components/dashboard/work-item-panel";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -48,13 +49,10 @@ export default function StandupsPage() {
 
   return (
     <AppShell>
-      <div className="mb-4 space-y-1">
-        <h1 className="text-xl font-semibold">Standups</h1>
-        <p className="text-sm text-muted-foreground">
-          Everyone&apos;s optional daily check-ins in one place, instead of a meeting. Skipping is fine and is never
-          flagged.
-        </p>
-      </div>
+      <PageHeader
+        title="Standups"
+        description="Everyone's optional daily check-ins in one place, instead of a meeting. Skipping is fine and is never flagged."
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => setDay(shiftDay(day, -1))}>
@@ -86,7 +84,7 @@ export default function StandupsPage() {
       {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {data && (
-        <div className="max-w-4xl space-y-6">
+        <div className="max-w-5xl space-y-6">
           <Card className={data.blockers.length > 0 ? "border-destructive/40" : undefined}>
             <CardHeader>
               <CardTitle className="text-base">Blockers ({data.blockers.length})</CardTitle>
@@ -96,9 +94,9 @@ export default function StandupsPage() {
               {data.blockers.length === 0 && <p className="text-muted-foreground">No blockers reported.</p>}
               {data.blockers.map((blocker, index) => (
                 <div key={index} className="flex flex-wrap items-baseline gap-2">
-                  <Badge variant={blocker.source === "flag" ? "destructive" : "outline"}>
+                  <StatusBadge tone={blocker.source === "flag" ? "danger" : "warning"}>
                     {blocker.source === "flag" ? "Marked blocked" : "Check-in"}
-                  </Badge>
+                  </StatusBadge>
                   {blocker.person && <span className="font-medium">{blocker.person}</span>}
                   {blocker.work_item_id && (
                     <button

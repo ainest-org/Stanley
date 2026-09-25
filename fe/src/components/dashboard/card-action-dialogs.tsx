@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Pick } from "@/components/ui/pick";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -24,6 +25,7 @@ import {
   linkMergeRequest,
   requestReview,
 } from "@/lib/actions-api";
+import { invalidateSoon } from "@/lib/sync-api";
 import { markWorkItemBlocked, unblockWorkItem } from "@/lib/dashboard-api";
 
 function ErrorBox({ error }: { error: unknown }) {
@@ -34,7 +36,16 @@ function ErrorBox({ error }: { error: unknown }) {
   );
 }
 
+/** Dialogs can be opened by their own button, or controlled from outside (e.g. a card's menu). */
+function useDialogState(open: boolean | undefined, onOpenChange: ((open: boolean) => void) | undefined) {
+  const [internal, setInternal] = useState(false);
+  const controlled = open !== undefined && onOpenChange !== undefined;
+  return [controlled ? open : internal, controlled ? onOpenChange : setInternal, controlled] as const;
+}
+
 export function CommentDialog({
+  open: openProp,
+  onOpenChange,
   kind,
   targetId,
   title,
@@ -44,8 +55,10 @@ export function CommentDialog({
   targetId: string;
   title: string;
   queryKeys: unknown[][];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen, controlled] = useDialogState(openProp, onOpenChange);
   const [body, setBody] = useState("");
   const queryClient = useQueryClient();
 
@@ -55,12 +68,13 @@ export function CommentDialog({
       setOpen(false);
       setBody("");
       for (const queryKey of queryKeys) queryClient.invalidateQueries({ queryKey });
+      invalidateSoon(queryClient);
     },
   });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>Comment</DialogTrigger>
+      {!controlled && <DialogTrigger render={<Button size="sm" variant="outline" />}>Comment</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Comment on &quot;{title}&quot;</DialogTitle>
@@ -79,6 +93,8 @@ export function CommentDialog({
 }
 
 export function RequestReviewDialog({
+  open: openProp,
+  onOpenChange,
   mergeRequestId,
   title,
   queryKeys,
@@ -86,8 +102,10 @@ export function RequestReviewDialog({
   mergeRequestId: string;
   title: string;
   queryKeys: unknown[][];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen, controlled] = useDialogState(openProp, onOpenChange);
   const [reviewerId, setReviewerId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const members = useQuery({ queryKey: ["members"], queryFn: fetchAllMembers, enabled: open });
@@ -98,12 +116,13 @@ export function RequestReviewDialog({
       setOpen(false);
       setReviewerId(null);
       for (const queryKey of queryKeys) queryClient.invalidateQueries({ queryKey });
+      invalidateSoon(queryClient);
     },
   });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>Request review</DialogTrigger>
+      {!controlled && <DialogTrigger render={<Button size="sm" variant="outline" />}>Request review</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Request a review on &quot;{title}&quot;</DialogTitle>
@@ -127,6 +146,8 @@ export function RequestReviewDialog({
 }
 
 export function MarkBlockedButton({
+  open: openProp,
+  onOpenChange,
   workItemId,
   title,
   blockedReason,
@@ -136,8 +157,10 @@ export function MarkBlockedButton({
   title: string;
   blockedReason: string | null;
   queryKeys: unknown[][];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen, controlled] = useDialogState(openProp, onOpenChange);
   const [reason, setReason] = useState("");
   const queryClient = useQueryClient();
   const refresh = () => {
@@ -164,7 +187,7 @@ export function MarkBlockedButton({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>Mark blocked</DialogTrigger>
+      {!controlled && <DialogTrigger render={<Button size="sm" variant="outline" />}>Mark blocked</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Mark &quot;{title}&quot; as blocked</DialogTitle>
@@ -186,6 +209,8 @@ export function MarkBlockedButton({
 }
 
 export function LinkMergeRequestDialog({
+  open: openProp,
+  onOpenChange,
   workItemId,
   title,
   queryKeys,
@@ -193,48 +218,88 @@ export function LinkMergeRequestDialog({
   workItemId: string;
   title: string;
   queryKeys: unknown[][];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [mergeRequestId, setMergeRequestId] = useState<string | null>(null);
+  const [open, setOpen, controlled] = useDialogState(openProp, onOpenChange);
+  const [iid, setIid] = useState<string | null>(null);
   const [closes, setCloses] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
   const candidates = useQuery({
-    queryKey: ["linkable-mrs", workItemId],
-    queryFn: () => fetchLinkableMergeRequests(workItemId),
+    queryKey: ["linkable-mrs", workItemId, search],
+    queryFn: () => fetchLinkableMergeRequests(workItemId, search),
     enabled: open,
   });
 
   const mutation = useMutation({
-    mutationFn: () => linkMergeRequest(workItemId, mergeRequestId as string, closes),
+    mutationFn: () => linkMergeRequest(workItemId, iid as string, closes),
     onSuccess: (result) => {
       for (const queryKey of [...queryKeys, ["linkable-mrs", workItemId]]) queryClient.invalidateQueries({ queryKey });
+      invalidateSoon(queryClient);
       if (result.note) return; // keep the dialog open so the note stays readable
       setOpen(false);
-      setMergeRequestId(null);
+      setIid(null);
       setCloses(false);
     },
   });
 
+  const list = candidates.data?.merge_requests ?? [];
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>Link MR</DialogTrigger>
+      {!controlled && <DialogTrigger render={<Button size="sm" variant="outline" />}>Link MR</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Link a merge request to &quot;{title}&quot;</DialogTitle>
           <DialogDescription>
-            Adds a &quot;Related to&quot; reference to the merge request description in GitLab. An item can
-            have several merge requests, and a merge request can serve several items.
+            Adds a &quot;Related to&quot; reference to the merge request description in GitLab. An item can have several
+            merge requests, and a merge request can serve several items.
           </DialogDescription>
         </DialogHeader>
-        <Pick
-          value={mergeRequestId}
-          onChange={setMergeRequestId}
-          options={(candidates.data ?? []).map((mr) => ({
-            value: mr.id,
-            label: `!${mr.iid} ${mr.title}${mr.mine ? " (yours)" : mr.author ? ` (${mr.author})` : ""}`,
-          }))}
-          placeholder={candidates.data?.length === 0 ? "No open merge requests to link" : "Choose a merge request"}
-        />
+
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSearch(searchInput.trim());
+            setIid(null);
+          }}
+        >
+          <Input
+            placeholder="Search open merge requests by title…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <Button type="submit" variant="outline">
+            Search
+          </Button>
+        </form>
+
+        {candidates.isLoading && <p className="text-sm text-muted-foreground">Loading merge requests from GitLab…</p>}
+        {candidates.isError && <ErrorBox error={candidates.error} />}
+        {candidates.data?.live_error && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">{candidates.data.live_error}</p>
+        )}
+        {candidates.data && list.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No open merge requests {search ? `matching "${search}" ` : ""}found in {candidates.data.project_name} that
+            you can see, or they already reference this item.
+          </p>
+        )}
+        {list.length > 0 && (
+          <Pick
+            value={iid}
+            onChange={setIid}
+            options={list.map((mr) => ({
+              value: mr.iid,
+              label: `!${mr.iid} ${mr.title}${mr.mine ? " (yours)" : mr.author ? ` (${mr.author})` : ""}`,
+            }))}
+            placeholder={`Choose from ${list.length} open merge request${list.length === 1 ? "" : "s"}`}
+          />
+        )}
+
         <div className="flex items-center gap-2">
           <Switch id={`closes-${workItemId}`} checked={closes} onCheckedChange={setCloses} />
           <Label htmlFor={`closes-${workItemId}`} className="text-sm">
@@ -244,7 +309,7 @@ export function LinkMergeRequestDialog({
         {mutation.isError && <ErrorBox error={mutation.error} />}
         {mutation.data?.note && <p className="text-sm text-amber-700 dark:text-amber-400">{mutation.data.note}</p>}
         <DialogFooter>
-          <Button disabled={!mergeRequestId || mutation.isPending} onClick={() => mutation.mutate()}>
+          <Button disabled={!iid || mutation.isPending} onClick={() => mutation.mutate()}>
             {mutation.isPending ? "Linking..." : "Link merge request"}
           </Button>
         </DialogFooter>
